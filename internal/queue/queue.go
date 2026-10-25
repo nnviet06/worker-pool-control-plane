@@ -8,15 +8,16 @@ import (
 	"time"
 )
 
-// Reason is why a request left the queue without being served. The values
-// are the ones returned to the client in X-Wpcp-Reason.
+// Reason is why a request was not served. The values are the ones returned
+// to the client in X-Wpcp-Reason.
 type Reason string
 
 const (
-	ReasonQueueFull Reason = "queue_full"
-	ReasonQueueWait Reason = "queue_wait"
-	ReasonDeadline  Reason = "deadline"
-	ReasonNoWorker  Reason = "no_worker"
+	ReasonQueueFull      Reason = "queue_full"
+	ReasonQueueWait      Reason = "queue_wait"
+	ReasonDeadline       Reason = "deadline"
+	ReasonNoWorker       Reason = "no_worker"
+	ReasonFailoverBudget Reason = "failover_budget"
 )
 
 // Config sets the bound and the drop rules.
