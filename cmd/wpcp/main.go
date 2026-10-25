@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nnviet06/worker-pool-control-plane/internal/admission"
+	"github.com/nnviet06/worker-pool-control-plane/internal/health"
 	"github.com/nnviet06/worker-pool-control-plane/internal/ingress"
 	"github.com/nnviet06/worker-pool-control-plane/internal/limiter"
 	"github.com/nnviet06/worker-pool-control-plane/internal/picker"
@@ -23,12 +24,15 @@ import (
 )
 
 type config struct {
-	listen, admin string
-	workers       workersFlag
-	cap           int
-	queue         queue.Config
-	ingress       ingress.Config
-	sweep         time.Duration
+	listen, admin  string
+	workers        workersFlag
+	cap            int
+	queue          queue.Config
+	ingress        ingress.Config
+	sweep          time.Duration
+	health         health.Config
+	budgetFloor    int
+	budgetFraction float64
 }
 
 func main() {
@@ -44,9 +48,20 @@ func main() {
 	flag.DurationVar(&cfg.ingress.AttemptTimeout, "attempt-timeout", 3*time.Second, "default per-attempt timeout")
 	flag.Int64Var(&cfg.ingress.MaxBodyBytes, "max-body", 1<<20, "largest request body in bytes")
 	flag.DurationVar(&cfg.sweep, "sweep", 100*time.Millisecond, "queue sweep interval")
+	flag.DurationVar(&cfg.health.Interval, "health-interval", 500*time.Millisecond, "health probe interval")
+	flag.DurationVar(&cfg.health.ProbeTimeout, "probe-timeout", 200*time.Millisecond, "health probe timeout")
+	flag.IntVar(&cfg.health.EjectAfter, "eject-after", 3, "consecutive failures that eject a worker")
+	flag.DurationVar(&cfg.health.EjectFor, "eject-for", 5*time.Second, "first ejection period, doubled on each further ejection")
+	flag.DurationVar(&cfg.health.EjectMax, "eject-max", time.Minute, "longest ejection period")
+	flag.IntVar(&cfg.budgetFloor, "failover-budget-floor", 2, "second attempts always allowed at once")
+	flag.Float64Var(&cfg.budgetFraction, "failover-budget-fraction", 0.1, "second attempts allowed as a fraction of requests in flight")
 	flag.Parse()
+	cfg.ingress.SendFloor = cfg.queue.SendFloor
 	if len(cfg.workers) == 0 {
 		log.Fatal("wpcp: -workers is required")
+	}
+	if cfg.sweep <= 0 || cfg.health.Interval <= 0 {
+		log.Fatal("wpcp: -sweep and -health-interval must be positive")
 	}
 	if err := run(cfg); err != nil {
 		log.Fatal("wpcp: ", err)
@@ -57,6 +72,7 @@ func run(cfg config) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	checker := health.NewChecker(cfg.health, time.Now)
 	workers := make([]*pool.Worker, 0, len(cfg.workers))
 	clients := make(map[string]ingress.Executor, len(cfg.workers))
 	for _, w := range cfg.workers {
@@ -65,9 +81,12 @@ func run(cfg config) error {
 			return err
 		}
 		defer c.Close()
+		worker := pool.NewWorker(w.id, cfg.cap)
+		checker.Add(worker, c)
 		clients[w.id] = c
-		workers = append(workers, pool.NewWorker(w.id, cfg.cap))
+		workers = append(workers, worker)
 	}
+	go checker.Run(ctx)
 	p := pool.New(workers...)
 	lim := limiter.NewStatic(len(workers) * cfg.cap)
 	ctrl := admission.New(p, picker.New(p, picker.LeastInFlight{}), lim, cfg.queue, time.Now)
@@ -75,7 +94,8 @@ func run(cfg config) error {
 	log.Printf("wpcp: %d workers, limit %d", len(workers), lim.Limit())
 
 	proxyMux := http.NewServeMux()
-	proxyMux.Handle("POST /", ingress.New(cfg.ingress, ctrl, clients))
+	budget := health.NewBudget(cfg.budgetFloor, cfg.budgetFraction, ctrl.InFlight)
+	proxyMux.Handle("POST /", ingress.New(cfg.ingress, ctrl, clients, checker, budget))
 	adminMux := http.NewServeMux()
 	adminMux.HandleFunc("GET /debug/state", debugState(p, ctrl))
 

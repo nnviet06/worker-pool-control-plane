@@ -47,8 +47,16 @@ func New(p *pool.Pool, s Scorer) *Picker {
 // new pair; if that fails too it returns ErrNoSlot, and the caller puts the
 // request at the head of the queue.
 func (p *Picker) Pick(c pool.Class) (*pool.Worker, error) {
+	return p.PickAvoiding(c, nil)
+}
+
+// PickAvoiding is Pick that never chooses avoid. A failover uses it so that
+// the second attempt does not land on the worker the first one failed on: a
+// worker that fails fast has no requests in flight and would otherwise look
+// like the best choice. It returns ErrNoSlot if only avoid has a free slot.
+func (p *Picker) PickAvoiding(c pool.Class, avoid *pool.Worker) (*pool.Worker, error) {
 	for range 2 {
-		w, err := p.choose(c)
+		w, err := p.choose(c, avoid)
 		if err != nil {
 			return nil, err
 		}
@@ -64,16 +72,16 @@ type candidate struct {
 	s pool.State
 }
 
-// choose draws two random candidates among live workers with a free slot and
-// returns the one with the lower score. Full workers are left out because a
-// reservation on them cannot succeed.
-func (p *Picker) choose(c pool.Class) (*pool.Worker, error) {
+// choose draws two random candidates among live workers with a free slot,
+// other than avoid, and returns the one with the lower score. Full workers
+// are left out because a reservation on them cannot succeed.
+func (p *Picker) choose(c pool.Class, avoid *pool.Worker) (*pool.Worker, error) {
 	var cands []candidate
 	live := false
 	for _, w := range p.pool.Workers() {
 		s := w.Snapshot()
 		live = live || s.Live
-		if s.Free() {
+		if s.Free() && w != avoid {
 			cands = append(cands, candidate{w, s})
 		}
 	}

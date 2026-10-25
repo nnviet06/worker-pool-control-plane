@@ -28,6 +28,24 @@ func TestReserveOnDeadWorker(t *testing.T) {
 	}
 }
 
+func TestDownClosesWhenNotLive(t *testing.T) {
+	w := NewWorker("a", 1)
+	down := w.Down()
+	w.SetLive(false)
+	select {
+	case <-down:
+	default:
+		t.Fatal("Down not closed after SetLive(false)")
+	}
+	w.SetLive(false) // a second call must not close twice
+	w.SetLive(true)
+	select {
+	case <-w.Down():
+		t.Fatal("Down closed after the worker came back")
+	default:
+	}
+}
+
 func TestReleaseFreesSlot(t *testing.T) {
 	w := NewWorker("a", 1)
 	w.Reserve("x")
