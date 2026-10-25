@@ -57,17 +57,17 @@ pitch changes. Knowing early is cheaper.
 
 ### Phase 1 — Core
 - [ ] `feat/limiter`
-- [ ] `feat/queue`
-- [ ] `feat/picker`
-- [ ] `feat/pool`
+- [x] `feat/queue`
+- [x] `feat/picker`
+- [x] `feat/pool`
 
 ### Phase 2 — Proxy on Compose
-- [ ] `feat/proto` (`timings_ms` field, read only by `calibrate`)
-- [ ] `feat/fakeworker`
-- [ ] `feat/ingress`
-- [ ] `feat/transport`
+- [x] `feat/proto` (`timings_ms` field, read only by `calibrate`)
+- [x] `feat/fakeworker`
+- [x] `feat/ingress`
+- [x] `feat/transport`
 - [ ] `feat/wpcp-cmd` (wiring, config, Compose file, `/debug/state`, limit-change log)
-- [ ] first k6 baseline script
+- [x] first k6 baseline script
 
 ### Phase 3 — Placement
 - [ ] `feat/contention-scorer` (includes the slowdown table file package shared with fakeworker and `calibrate`)
@@ -81,8 +81,8 @@ pitch changes. Knowing early is cheaper.
 - [ ] go/no-go recorded in design.md §8
 
 ### Phase 5 — Resilience
-- [ ] `feat/health`
-- [ ] `feat/failover`
+- [x] `feat/health`
+- [x] `feat/failover`
 - [ ] `feat/fault-scripts`
 - [ ] `exp/1-worker-death` (with k6 time-series post-processing)
 - [ ] `exp/2-overload` (2a queue vs pass-through, 2b gradient vs static limit)
