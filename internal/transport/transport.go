@@ -3,18 +3,21 @@ package transport
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	workerpb "github.com/nnviet06/worker-pool-control-plane/api/proto"
 )
 
-// Client sends requests to one worker.
+// Client sends requests and health probes to one worker.
 type Client struct {
 	conn   *grpc.ClientConn
 	worker workerpb.WorkerClient
+	health healthpb.HealthClient
 }
 
 // Dial returns a client for the worker at addr. The connection is opened
@@ -25,7 +28,20 @@ func Dial(addr string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{conn: conn, worker: workerpb.NewWorkerClient(conn)}, nil
+	return &Client{conn: conn, worker: workerpb.NewWorkerClient(conn), health: healthpb.NewHealthClient(conn)}, nil
+}
+
+// Probe asks the worker's grpc.health.v1 service for its overall status and
+// returns an error unless it is SERVING.
+func (c *Client) Probe(ctx context.Context) error {
+	resp, err := c.health.Check(ctx, &healthpb.HealthCheckRequest{})
+	if err != nil {
+		return err
+	}
+	if s := resp.GetStatus(); s != healthpb.HealthCheckResponse_SERVING {
+		return fmt.Errorf("transport: worker reports %s", s)
+	}
+	return nil
 }
 
 // Execute sends one attempt. The worker receives the absolute deadline of the
