@@ -60,6 +60,15 @@ func TestSnapshotIsACopy(t *testing.T) {
 	}
 }
 
+func TestLiveCountsOnlyLiveWorkers(t *testing.T) {
+	a, b, c := NewWorker("a", 2), NewWorker("b", 3), NewWorker("c", 4)
+	b.SetLive(false)
+	workers, slots := New(a, b, c).Live()
+	if workers != 2 || slots != 6 {
+		t.Fatalf("Live() = %d workers, %d slots; want 2, 6", workers, slots)
+	}
+}
+
 func TestConcurrentReserveNeverExceedsCap(t *testing.T) {
 	w := NewWorker("a", 2)
 	var ok atomic.Int32
