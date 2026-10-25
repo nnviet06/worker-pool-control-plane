@@ -66,6 +66,25 @@ func TestPickSkipsDeadAndFull(t *testing.T) {
 	}
 }
 
+func TestPickAvoiding(t *testing.T) {
+	a, b := pool.NewWorker("a", 2), pool.NewWorker("b", 2)
+	b.Reserve("x") // a scores better, but is avoided
+	p := New(pool.New(a, b), LeastInFlight{})
+	for range 50 {
+		w, err := p.PickAvoiding("x", a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w.ID() != "b" {
+			t.Fatalf("picked %s, want b", w.ID())
+		}
+		w.Release("x")
+	}
+	if _, err := New(pool.New(a), LeastInFlight{}).PickAvoiding("x", a); !errors.Is(err, ErrNoSlot) {
+		t.Fatalf("err = %v, want ErrNoSlot when only the avoided worker is free", err)
+	}
+}
+
 func TestPickUsesScorer(t *testing.T) {
 	a, b := pool.NewWorker("a", 2), pool.NewWorker("b", 2)
 	a.Reserve("x")
