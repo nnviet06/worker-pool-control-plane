@@ -47,9 +47,9 @@ pitch changes. Knowing early is cheaper.
 ## Checklist
 
 ### Phase 0 — Setup and probe
-- [ ] `chore/setup`: `go.mod`, Makefile, `.github/workflows`
+- [x] `chore/setup`: `go.mod`, Makefile, `.github/workflows`
 - [ ] `.wslconfig` memory raised, Docker Desktop verified
-- [ ] Go, `make`, k6, protoc/buf on PATH in Git Bash; gcc present for `-race`
+- [x] Go, `make`, k6, protoc/buf on PATH in Git Bash; gcc present for `-race`
 - [ ] k6 as a Compose service on the third core set
 - [ ] `chore/probe`: core-set sibling map, `tc netem` check, Ollama on two core sets
 - [ ] `exp/0-leak-check` (0a)
