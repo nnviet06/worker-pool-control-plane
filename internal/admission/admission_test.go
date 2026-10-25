@@ -105,6 +105,54 @@ func TestQueuedRequestsRunInOrderOnRelease(t *testing.T) {
 	}
 }
 
+func TestAcquireFrontWaitsAheadAndIgnoresCapacity(t *testing.T) {
+	c := newController(newClock(), 1, pool.NewWorker("a", 1))
+	held, _ := c.Acquire(context.Background(), "x", t0.Add(time.Minute))
+	back := acquireAsync(t, context.Background(), c, t0.Add(time.Minute))
+
+	front := make(chan outcome, 1)
+	go func() {
+		w, err := c.AcquireFront(context.Background(), "x", t0.Add(time.Minute), nil)
+		front <- outcome{w, err}
+	}()
+	waitFor(t, func() bool { return c.Stats().Queued == 2 })
+
+	c.Release(held, "x")
+	got := <-front
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	select {
+	case <-back:
+		t.Fatal("request queued earlier ran before the failover")
+	default:
+	}
+	c.Release(got.w, "x")
+	<-back
+}
+
+func TestAcquireFrontWaitsForAnotherWorker(t *testing.T) {
+	a, b := pool.NewWorker("a", 1), pool.NewWorker("b", 1)
+	c := newController(newClock(), 1, a, b)
+	held, _ := c.Acquire(context.Background(), "x", t0.Add(time.Minute))
+	failed := a
+	if held == a {
+		failed = b
+	}
+
+	got := make(chan outcome, 1)
+	go func() {
+		w, err := c.AcquireFront(context.Background(), "x", t0.Add(time.Minute), failed)
+		got <- outcome{w, err}
+	}()
+	waitFor(t, func() bool { return c.Stats().Queued == 1 })
+
+	c.Release(held, "x")
+	if r := <-got; r.err != nil || r.w != held {
+		t.Fatalf("got worker %v, err %v; want the other worker %s", r.w, r.err, held.ID())
+	}
+}
+
 func TestRejectWhenQueueFull(t *testing.T) {
 	c := newController(newClock(), 1, pool.NewWorker("a", 1))
 	c.Acquire(context.Background(), "x", t0.Add(time.Minute))

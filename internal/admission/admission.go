@@ -61,6 +61,18 @@ func New(p *pool.Pool, pk *picker.Picker, l Limiter, qc queue.Config, now func()
 // Release when the request completes. It returns a *RejectError when the
 // request is rejected or dropped, or ctx's error if ctx ends first.
 func (c *Controller) Acquire(ctx context.Context, class pool.Class, deadline time.Time) (*pool.Worker, error) {
+	return c.acquire(ctx, class, deadline, false, nil)
+}
+
+// AcquireFront is Acquire for a request that is being failed over from
+// failed. It was admitted once already, so if it has to wait it waits at the
+// head of the queue and is never rejected as queue_full. It is never placed
+// on failed.
+func (c *Controller) AcquireFront(ctx context.Context, class pool.Class, deadline time.Time, failed *pool.Worker) (*pool.Worker, error) {
+	return c.acquire(ctx, class, deadline, true, failed)
+}
+
+func (c *Controller) acquire(ctx context.Context, class pool.Class, deadline time.Time, front bool, avoid *pool.Worker) (*pool.Worker, error) {
 	now := c.now()
 	c.mu.Lock()
 	// After dispatch the queue is either empty or the pool is at its limit,
@@ -73,7 +85,7 @@ func (c *Controller) Acquire(ctx context.Context, class pool.Class, deadline tim
 	}
 	admitted := c.queue.Len() == 0 && c.inFlight < limiter.Effective(c.limiter.Limit(), live, slots)
 	if admitted {
-		w, err := c.picker.Pick(class)
+		w, err := c.picker.PickAvoiding(class, avoid)
 		if err == nil {
 			c.inFlight++
 			c.mu.Unlock()
@@ -84,10 +96,10 @@ func (c *Controller) Acquire(ctx context.Context, class pool.Class, deadline tim
 			return nil, &RejectError{queue.ReasonNoWorker}
 		}
 	}
-	wt := &waiter{class: class, enqueued: now, deadline: deadline, ready: make(chan result, 1)}
-	if admitted {
-		// The state changed under placement. The request was already
-		// admitted, so it waits at the head.
+	wt := &waiter{class: class, avoid: avoid, enqueued: now, deadline: deadline, ready: make(chan result, 1)}
+	if admitted || front {
+		// Either the state changed under placement after admission, or the
+		// request is a failover; both wait at the head.
 		c.queue.PushFront(wt, now, deadline)
 	} else if !c.queue.Push(wt, now, deadline) {
 		c.mu.Unlock()
@@ -136,6 +148,13 @@ func (c *Controller) Run(ctx context.Context, interval time.Duration) {
 	}
 }
 
+// InFlight returns the number of requests holding a worker slot.
+func (c *Controller) InFlight() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.inFlight
+}
+
 // Stats returns a snapshot of the controller.
 func (c *Controller) Stats() Stats {
 	c.mu.Lock()
@@ -171,9 +190,10 @@ func (c *Controller) dispatchLocked() {
 		if wt.cancelled() {
 			continue
 		}
-		w, err := c.picker.Pick(wt.class)
+		w, err := c.picker.PickAvoiding(wt.class, wt.avoid)
 		if err != nil {
-			// A worker changed state since Live; try again on the next tick.
+			// A worker changed state since Live, or the only free slot is on
+			// the worker this request failed on; try again on the next tick.
 			c.queue.PushFront(wt, wt.enqueued, wt.deadline)
 			return
 		}
@@ -199,6 +219,7 @@ const (
 // waiter is a queued request. Exactly one of finish and cancel wins.
 type waiter struct {
 	class    pool.Class
+	avoid    *pool.Worker // set on a failover: the worker it failed on
 	enqueued time.Time
 	deadline time.Time
 	ready    chan result // buffered, so finish never blocks under c.mu
