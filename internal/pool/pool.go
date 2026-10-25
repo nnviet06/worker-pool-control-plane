@@ -99,3 +99,16 @@ func New(workers ...*Worker) *Pool {
 
 // Workers returns the workers in the pool. The slice must not be modified.
 func (p *Pool) Workers() []*Worker { return p.workers }
+
+// Live returns the number of live workers and the sum of their caps.
+func (p *Pool) Live() (workers, slots int) {
+	for _, w := range p.workers {
+		w.mu.Lock()
+		if w.live {
+			workers++
+			slots += w.cap
+		}
+		w.mu.Unlock()
+	}
+	return workers, slots
+}
