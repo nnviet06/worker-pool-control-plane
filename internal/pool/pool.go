@@ -27,13 +27,14 @@ type Worker struct {
 
 	mu       sync.Mutex
 	live     bool
+	down     chan struct{} // closed when the worker stops being live
 	inFlight int
 	byClass  map[Class]int
 }
 
 // NewWorker returns a live worker with no requests in flight.
 func NewWorker(id string, cap int) *Worker {
-	return &Worker{id: id, cap: cap, live: true, byClass: make(map[Class]int)}
+	return &Worker{id: id, cap: cap, live: true, down: make(chan struct{}), byClass: make(map[Class]int)}
 }
 
 // ID returns the worker's identifier.
@@ -69,11 +70,29 @@ func (w *Worker) Release(c Class) {
 }
 
 // SetLive marks the worker live or not. Requests already in flight keep
-// their slots until they are released.
+// their slots until they are released; marking the worker not live closes
+// the channel returned by Down so they can stop.
 func (w *Worker) SetLive(live bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if live == w.live {
+		return
+	}
 	w.live = live
+	if live {
+		w.down = make(chan struct{})
+	} else {
+		close(w.down)
+	}
+}
+
+// Down returns a channel that is closed when the worker stops being live.
+// A request takes it once after reserving a slot and watches it while it
+// runs.
+func (w *Worker) Down() <-chan struct{} {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.down
 }
 
 // Snapshot returns a copy of the worker's state.
